@@ -1,6 +1,7 @@
 // Baritone — open-source neural PDF reader. MIT License.
 import * as pdfjs from "./vendor/pdfjs/pdf.min.mjs";
-import { itemsToLines, stripRunningHeaders, linesToParagraphs, plainTextToParagraphs, buildChunks } from "./textproc.js";
+import { ocrPage, stopOcr } from "./ocr.js";
+import { stripCaptions, itemsToLines, stripRunningHeaders, linesToParagraphs, plainTextToParagraphs, buildChunks } from "./textproc.js";
 
 pdfjs.GlobalWorkerOptions.workerSrc = new URL("./vendor/pdfjs/pdf.worker.min.mjs", import.meta.url).href;
 
@@ -13,7 +14,7 @@ const store = {
 // ---------- Settings ----------
 const VOICE_NAMES = { am_michael: "Michael", am_fenrir: "Fenrir", am_onyx: "Onyx", am_puck: "Puck", am_eric: "Eric" };
 const S = Object.assign(
-  { voice: "am_michael", depth: 0.95, speed: 1.0, pause: 1, fontSize: 20, skipCite: true, skipUrl: true, wake: true, engine: "wasm", prepMinutes: 20 },
+  { voice: "am_michael", depth: 0.95, speed: 1.0, pause: 1, fontSize: 20, skipCite: true, skipUrl: true, skipCaptions: true, wake: true, engine: "wasm", prepMinutes: 20 },
   store.get("settings", {})
 );
 const saveSettings = () => store.set("settings", S);
@@ -444,22 +445,34 @@ $("file").addEventListener("change", async (e) => {
     const data = new Uint8Array(await f.arrayBuffer());
     const pdf = await pdfjs.getDocument({ data, isEvalSupported: false }).promise;
     const pagesLines = [];
+    let ocrUsed = false;
+    const t0 = performance.now();
     for (let p = 1; p <= pdf.numPages; p++) {
-      busy(`Reading page ${p} of ${pdf.numPages}…`);
       const page = await pdf.getPage(p);
       const tc = await page.getTextContent();
-      pagesLines.push(itemsToLines(tc.items));
+      let lines = itemsToLines(tc.items);
+      // No real text on this page (scan, or letters drawn as shapes): recognise it.
+      if (lines.reduce((a, l) => a + l.text.length, 0) < 20) {
+        if (!ocrUsed) { ocrUsed = true; }
+        const left = p > 1 && ocrUsed ? Math.round(((performance.now() - t0) / (p - 1)) * (pdf.numPages - p + 1) / 60000) : 0;
+        busy(`This PDF is made of images, so Baritone is reading the text from them — page ${p} of ${pdf.numPages}${left > 0 ? ` (about ${left} min left)` : ""}…`);
+        try { lines = await ocrPage(page); } catch (err) { console.warn("OCR failed on page", p, err); lines = []; }
+      } else {
+        busy(`Reading page ${p} of ${pdf.numPages}…`);
+      }
+      pagesLines.push(lines);
       page.cleanup();
     }
+    if (ocrUsed) stopOcr();
     const cleaned = stripRunningHeaders(pagesLines);
     const pages = cleaned.map((lines, i) => ({ num: i + 1, paragraphs: linesToParagraphs(lines) }));
     mergeAcrossPages(pages);
     let title = f.name.replace(/\.pdf$/i, "");
-    try { const meta = await pdf.getMetadata(); const t = (meta?.info?.Title || "").replace(/^Microsoft (Word|PowerPoint) - /, "").trim(); if (t.length > 3 && !/^\(?(anonymous|untitled)\)?$/i.test(t) && !/\.(docx?|pptx?)$/i.test(t)) title = t; } catch {}
+    try { const meta = await pdf.getMetadata(); const t = (meta?.info?.Title || "").replace(/^Microsoft (Word|PowerPoint) - /, "").replace(/\s+[-–|]\s+(Instapaper|Pocket|Medium)$/i, "").trim(); if (t.length > 3 && !/^\(?(anonymous|untitled)\)?$/i.test(t) && !/\.(docx?|pptx?)$/i.test(t)) title = t; } catch {}
     await pdf.destroy();
     if (!pages.some((p) => p.paragraphs.length)) {
       busy(false);
-      status("This PDF has no selectable text (it may be a scan). Try a PDF with real text.");
+      status("Couldn't find any readable text in this PDF.");
       return;
     }
     loadDoc({ key: f.name + ":" + f.size, name: title, pages });
@@ -475,7 +488,7 @@ function mergeAcrossPages(pages) {
     const a = pages[i].paragraphs, b = pages[i + 1].paragraphs;
     if (!a.length || !b.length) continue;
     const last = a[a.length - 1], first = b[0];
-    const continues = /^[a-z,;)]/.test(first.text) || (!/[.!?:"”)]$/.test(last.text) && /^[a-z(]/.test(first.text));
+    const continues = /^[a-z,;)]/.test(first.text) || (!/[.!?:"”’)…]$/.test(last.text) && /^[A-Za-z(]/.test(first.text));
     if (!last.heading && !first.heading && continues) {
       last.text = /[A-Za-z]-$/.test(last.text) ? last.text.slice(0, -1) + first.text : last.text + " " + first.text;
       b.shift();
@@ -488,7 +501,7 @@ function loadDoc(d, restore = false) {
   resetPipeline();
   audio.pause(); setPlaying(false);
   doc = d;
-  ({ chunks, paras } = buildChunks(doc.pages, { skipCitations: S.skipCite, skipUrls: S.skipUrl }));
+  ({ chunks, paras } = buildChunks(readablePages(), { skipCitations: S.skipCite, skipUrls: S.skipUrl }));
   const pos = store.get("pos", {})[doc.key] || 0;
   cur = Math.min(pos, chunks.length - 1);
   render();
@@ -497,10 +510,15 @@ function loadDoc(d, restore = false) {
   pump();
 }
 
+function readablePages() {
+  const pages = doc.pages.map((p) => ({ ...p, paragraphs: p.paragraphs.map((q) => ({ ...q })) }));
+  return S.skipCaptions ? stripCaptions(pages) : pages;
+}
+
 function rebuild() { // settings that change the spoken text
   if (!doc) return;
   const keep = cur;
-  ({ chunks, paras } = buildChunks(doc.pages, { skipCitations: S.skipCite, skipUrls: S.skipUrl }));
+  ({ chunks, paras } = buildChunks(readablePages(), { skipCitations: S.skipCite, skipUrls: S.skipUrl }));
   cur = Math.min(keep, chunks.length - 1);
   resetPipeline(); render(); if (playing) goTo(cur, { play: true }); else pump();
 }
@@ -597,18 +615,18 @@ $("speed").value = S.speed;
 $("speed").oninput = (e) => setSetting("speed", +(+e.target.value).toFixed(2));
 $("fontSize").value = S.fontSize;
 $("fontSize").oninput = (e) => setSetting("fontSize", +e.target.value);
-for (const k of ["skipCite", "skipUrl", "wake"]) { $(k).checked = S[k]; $(k).onchange = (e) => setSetting(k, e.target.checked); }
+for (const k of ["skipCite", "skipUrl", "skipCaptions", "wake"]) { $(k).checked = S[k]; $(k).onchange = (e) => setSetting(k, e.target.checked); }
 $("previewBtn").onclick = preview;
 
 function setSetting(k, v) {
   if (S[k] === v) return;
-  if (prep && ["voice", "depth", "speed", "pause", "skipCite", "skipUrl"].includes(k)) { cancelPrep(); status("Settings changed — tap Prepare again"); }
+  if (prep && ["voice", "depth", "speed", "pause", "skipCite", "skipUrl", "skipCaptions"].includes(k)) { cancelPrep(); status("Settings changed — tap Prepare again"); }
   S[k] = v; saveSettings(); applyUI();
   if (["voice", "depth", "speed", "pause"].includes(k)) {
     // keep the sentence that's playing; regenerate from the next one
     resetPipeline({ except: playing ? cur : -1 });
     pump();
-  } else if (k === "skipCite" || k === "skipUrl") rebuild();
+  } else if (k === "skipCite" || k === "skipUrl" || k === "skipCaptions") rebuild();
   else if (k === "engine") { store.set("settings", S); location.reload(); }
   else if (k === "wake") { if (v && playing) requestWake(); else releaseWake(); }
 }

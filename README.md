@@ -8,6 +8,7 @@ your documents are never uploaded, and once the voice has downloaded it works of
 - **Open any text PDF** (Files, iCloud Drive, Downloads), or paste text.
 - **Deep American male voices:** Michael (default), Fenrir, Onyx, Puck and Eric, plus a **Depth** control
   (Natural / Deep / Deeper / Deepest) that lowers the pitch without changing the speed.
+- **Photo captions and credits** ("… Credit… Jane Doe") and print clutter are skipped (optional).
 - **Clear pronunciation:** abbreviations are expanded (e.g. → "for example", Fig. 3 → "Figure 3", 45% → "45 percent",
   Jan. → "January"); words hyphenated across lines are rejoined; running headers, footers and page numbers are removed;
   citation numbers like [12] and web addresses are skipped (you can turn this off).
@@ -52,7 +53,7 @@ then open http://localhost:8000.
 - **Speed of the voice engine:** recent iPhones generate speech faster than real time on the CPU engine. If you hear
   "Preparing voice…" gaps on an older phone, try the **GPU** engine in settings (iOS 26 or later; larger download).
 - **If the voice freezes** (most likely on the GPU engine), Baritone restarts the engine by itself and picks up where it left off. If the GPU freezes twice, it switches to the CPU engine and keeps reading.
-- **Scanned PDFs** (pictures of pages) have no text to read. Run them through an OCR app first.
+- **PDFs made of images** (scans, or "Print to PDF" files where letters are drawn as shapes) are read with on-device text recognition (Tesseract). This takes a few seconds per page the first time; the result is remembered.
 
 ## How it works
 | Part | What it does | License |
@@ -63,6 +64,7 @@ then open http://localhost:8000.
 | `sw.js` | Offline cache and cross-origin isolation (enables multi-threaded speech) | MIT |
 | `vendor/kokoro.web.js` | [kokoro-js](https://github.com/hexgrad/kokoro) 1.2.1 (bundles transformers.js) | Apache-2.0 |
 | `vendor/ort/` | ONNX Runtime Web engine | MIT |
+| `ocr.js`, `vendor/tesseract/` | On-device text recognition for image-only PDFs ([Tesseract.js](https://github.com/naptha/tesseract.js) 6) | Apache-2.0 |
 | `vendor/pdfjs/` | [pdf.js](https://mozilla.github.io/pdf.js/) 4.10.38 | Apache-2.0 |
 | Voice model | [Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M), fetched once from Hugging Face | Apache-2.0 |
 

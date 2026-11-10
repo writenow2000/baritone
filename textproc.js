@@ -97,6 +97,8 @@ export function linesToParagraphs(lines) {
   const medW = median(widths) || 1;
   const medX = median(lines.map((l) => l.x));
 
+  // OCR line heights are rough, so require a much bigger size jump for headings.
+  const headingRatio = lines[0]?.ocr ? 1.45 : 1.18;
   const paras = [];
   let buf = null;
   const flush = () => {
@@ -107,7 +109,7 @@ export function linesToParagraphs(lines) {
     const l = lines[i];
     const prev = lines[i - 1];
     const isHeading =
-      (l.h > medH * 1.18 && l.text.length < 120) ||
+      (l.h > medH * headingRatio && l.text.length < 120) ||
       (/^[A-Z0-9][A-Z0-9 ,:&'\-–—]{3,80}$/.test(l.text) && /[A-Z]{3}/.test(l.text) && l.text.split(" ").length <= 10 && !/[.]$/.test(l.text));
     let breakHere = !buf;
     if (buf && prev) {
@@ -141,9 +143,34 @@ export function linesToParagraphs(lines) {
 
 function joinLine(a, b) {
   // De-hyphenate words broken across lines: "infor-" + "mation"
+  if (/-[A-Za-z0-9]+-$/.test(a) && /^[a-z]/.test(b)) return a + b;      // "473-year-" + "old" keeps its hyphen
   if (/[A-Za-z]-$/.test(a) && /^[a-z]/.test(b)) return a.slice(0, -1) + b;
   if (/[A-Za-z]­$/.test(a)) return a.slice(0, -1) + b;
   return a + " " + b;
+}
+
+// ---------- Photo captions and page clutter ----------
+const CREDIT = /\bCredit\s*(?:\.{2,}|…|:)\s*[A-Z][\w'’.\-]*(?:\s+[A-Z][\w'’\-]*)?/;
+const CLUTTER = /(Order Reprints|Today[’']s Paper|^A ?version of this article appears in print|^Advertisement$|^Skip advertisement$|^Supported by$)/i;
+
+/** Remove photo captions ("... Credit... Jane Doe") and print/web clutter.
+ *  A caption glued to the start of a paragraph is cut off; the rest is kept. */
+export function stripCaptions(pages) {
+  for (const pg of pages) {
+    pg.paragraphs = pg.paragraphs.flatMap((p) => {
+      if (CLUTTER.test(p.text)) return [];
+      let t = p.text, m;
+      while ((m = CREDIT.exec(t))) {
+        const rest = t.slice(m.index + m[0].length).trim();
+        // The caption may have spilled over from the previous page ("Credit...John" / "Riddy ...").
+        t = rest.split(/\s+/).length < 3 ? "" : rest;
+      }
+      if (!t.trim()) return [];
+      return [{ ...p, text: t.trim() }];
+    });
+  }
+  // A caption split across pages leaves a dangling surname at the top of the next page.
+  return pages;
 }
 
 /** Plain pasted text -> paragraphs */
@@ -203,6 +230,7 @@ const SPOKEN = [
   [/\bU\.K\./g, "U K"],
   [/\band\/or\b/gi, "and or"],
   [/\s&\s/g, " and "],
+  [/\b([A-Z])&([A-Z])\b/g, "$1 and $2"],
   [/(\d)\s?%/g, "$1 percent"],
   [/(\d)\s?°\s?F\b/g, "$1 degrees Fahrenheit"],
   [/(\d)\s?°\s?C\b/g, "$1 degrees Celsius"],
