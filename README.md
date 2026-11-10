@@ -51,6 +51,7 @@ then open http://localhost:8000.
   iOS pauses web apps in the background. "Keep screen on" is enabled by default for this.
 - **Speed of the voice engine:** recent iPhones generate speech faster than real time on the CPU engine. If you hear
   "Preparing voice…" gaps on an older phone, try the **GPU** engine in settings (iOS 26 or later; larger download).
+- **If the voice freezes** (most likely on the GPU engine), Baritone restarts the engine by itself and picks up where it left off. If the GPU freezes twice, it switches to the CPU engine and keeps reading.
 - **Scanned PDFs** (pictures of pages) have no text to read. Run them through an OCR app first.
 
 ## How it works

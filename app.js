@@ -42,17 +42,32 @@ function unlockAudio() {
 }
 
 // ---------- Worker ----------
-const worker = new Worker(new URL("./tts-worker.js", import.meta.url), { type: "module" });
-worker.onmessage = (e) => {
+let worker = null;
+let jobStartedAt = 0;      // when the engine began the sentence it's working on
+let lastEngineMsg = 0;     // last sign of life while loading
+let gpuWarm = false;       // first GPU sentence is slow (shader setup)
+let strikes = 0;
+function startWorker() {
+  worker = new Worker(new URL("./tts-worker.js", import.meta.url), { type: "module" });
+  worker.onmessage = onEngineMessage;
+  worker.onerror = (e) => { console.warn("engine crashed", e.message); recover("crashed"); };
+}
+startWorker();
+
+function onEngineMessage(e) {
   const m = e.data;
+  lastEngineMsg = Date.now();
+  if (m.type === "start") { jobStartedAt = Date.now(); return; }
+  if (m.type === "audio" || m.type === "genError") { jobStartedAt = 0; if (m.type === "audio") gpuWarm = true; }
   if (m.type === "progress") {
     const pct = Math.round((m.loaded / m.total) * 100);
     status(`Downloading voice… ${pct}% (${(m.loaded / 1e6).toFixed(0)} of ${(m.total / 1e6).toFixed(0)} MB)`);
   } else if (m.type === "ready") {
-    ready = true; loading = false;
+    ready = true; loading = false; gpuWarm = m.device !== "webgpu";
+    store.set("modelSeen", true);
     $("engineInfo").textContent = `Running on ${m.device === "webgpu" ? "GPU" : "CPU"}${m.isolated ? " (multi-threaded)" : ""}. Changing this reloads the voice.`;
     $("firstRun").hidden = true;
-    status(doc ? "Ready" : "Voice ready — open a PDF");
+    status(prep ? "Preparing screen-off track…" : waiting >= 0 ? "Preparing voice…" : doc ? "Ready" : "Voice ready — open a PDF");
     pump();
     prepPump();
   } else if (m.type === "note") {
@@ -78,11 +93,46 @@ worker.onmessage = (e) => {
     if (waiting === m.id && playing) advance();
     pump();
   }
-};
+}
+
+// ---------- Watchdog: restart a frozen voice engine, fall back to CPU ----------
+const WD = Number(new URLSearchParams(location.search).get("wd")) || 1; // time-limit scale (testing)
+setInterval(() => {
+  const now = Date.now();
+  const gpu = S.engine === "webgpu";
+  if (ready && jobStartedAt) {
+    const limit = (gpu ? (gpuWarm ? 40e3 : 90e3) : 240e3) * WD;
+    if (now - jobStartedAt > limit) recover("stopped responding");
+  } else if (loading && lastEngineMsg && now - lastEngineMsg > 120e3) {
+    recover("stopped responding while loading");
+  }
+}, 1000);
+
+function recover(reason) {
+  try { worker.terminate(); } catch {}
+  strikes++;
+  ready = false; loading = false; jobStartedAt = 0;
+  let msg = "Voice engine " + reason + " — restarting it…";
+  if (S.engine === "webgpu" && strikes >= 2) {
+    S.engine = "wasm"; saveSettings();
+    document.querySelectorAll("#engineSeg button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.v === "wasm")));
+    msg = "GPU voice kept freezing — switched to CPU and continuing…";
+  }
+  // Work that was queued in the old engine is gone; queue it again.
+  epoch++; requested.clear();
+  if (prep) {
+    prep.serial = ++prepSerial; prep.inflight = 0;
+    prep.next = prep.ids.length ? prep.ids[prep.ids.length - 1] + 1 : prep.first;
+  }
+  if (previewing && $("previewBtn").textContent.startsWith("Generating")) { previewing = false; $("previewBtn").textContent = "▶︎ Preview this voice"; }
+  startWorker();
+  loadVoice();
+  status(msg);
+}
 
 function loadVoice() {
   if (ready || loading) return;
-  loading = true;
+  loading = true; lastEngineMsg = Date.now();
   status("Loading voice…");
   worker.postMessage({ type: "init", device: S.engine });
 }
@@ -576,7 +626,6 @@ applyUI();
 const last = store.get("lastDoc");
 if (last?.pages) loadDoc(last, true);
 if (store.get("modelSeen", false)) loadVoice(); // already downloaded before → warm up silently
-worker.addEventListener("message", (e) => { if (e.data.type === "ready") store.set("modelSeen", true); });
 
 // Offline support + cross-origin isolation (enables multi-threaded speech engine).
 if ("serviceWorker" in navigator && location.protocol !== "file:") {

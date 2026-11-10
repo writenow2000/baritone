@@ -1,6 +1,6 @@
 // Baritone service worker: offline app shell + cross-origin isolation headers
 // (lets the speech engine use multiple CPU threads). MIT License.
-const VERSION = "baritone-v2";
+const VERSION = "baritone-v3";
 const SHELL = [
   "./", "index.html", "app.js", "textproc.js", "tts-worker.js", "manifest.webmanifest",
   "vendor/kokoro.web.js", "vendor/pdfjs/pdf.min.mjs", "vendor/pdfjs/pdf.worker.min.mjs",

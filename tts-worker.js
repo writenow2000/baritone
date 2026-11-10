@@ -100,6 +100,7 @@ self.onmessage = (e) => {
     chain = chain.then(async () => {
       if (m.epoch < epoch || !tts) return;
       try {
+        post({ type: "start", id: m.id });
         const t0 = performance.now();
         const audio = await tts.generate(m.text, { voice: m.voice, speed: m.speed / m.depth });
         if (m.epoch < epoch) return;
