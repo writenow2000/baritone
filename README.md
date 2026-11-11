@@ -1,12 +1,13 @@
 # Baritone — open-source neural PDF reader for iPhone
 
 Baritone reads PDFs aloud in a deep, clear American male voice. It's a web app you install
-on your iPhone's Home Screen. The neural voice (**Kokoro-82M**) runs **entirely on the phone**:
+on your iPhone's Home Screen. The neural voice (**Piper "Ryan"** by default) runs **entirely on the phone**:
 your documents are never uploaded, and once the voice has downloaded it works offline.
 
 ## Features
 - **Open any text PDF** (Files, iCloud Drive, Downloads), or paste text.
-- **Deep American male voices:** Michael (default), Fenrir, Onyx, Puck and Eric, plus a **Depth** control
+- **Deep American male voices:** **Ryan** (default, Piper; fast enough for iPhone) and **Ryan HD**, plus the more natural but
+  much slower Kokoro voices Michael, Fenrir, Onyx, Puck and Eric. A **Depth** control
   (Natural / Deep / Deeper / Deepest) that lowers the pitch without changing the speed.
 - **Photo captions and credits** ("… Credit… Jane Doe") and print clutter are skipped (optional).
 - **Clear pronunciation:** abbreviations are expanded (e.g. → "for example", Fig. 3 → "Figure 3", 45% → "45 percent",
@@ -50,8 +51,8 @@ then open http://localhost:8000.
   iPhone). When the track ends, prepare the next stretch.
 - **Normal mode** (the play button) reads sentence by sentence and needs the app open with the screen on.
   iOS pauses web apps in the background. "Keep screen on" is enabled by default for this.
-- **Speed of the voice engine:** recent iPhones generate speech faster than real time on the CPU engine. If you hear
-  "Preparing voice…" gaps on an older phone, try the **GPU** engine in settings (iOS 26 or later; larger download).
+- **Speed:** Ryan is designed for low-power devices and is the voice to use on iPhone. The Kokoro voices (Michael etc.)
+  sound more natural but generate speech slower than real time on iPhone and use a lot of memory.
 - **If the voice freezes** (most likely on the GPU engine), Baritone restarts the engine by itself and picks up where it left off. If the GPU freezes twice, it switches to the CPU engine and keeps reading.
 - **PDFs made of images** (scans, or "Print to PDF" files where letters are drawn as shapes) are read with on-device text recognition (Tesseract). This takes a few seconds per page the first time; the result is remembered.
 
@@ -60,13 +61,18 @@ then open http://localhost:8000.
 |---|---|---|
 | `app.js` | UI, playback queue, media session, saved position | MIT |
 | `textproc.js` | PDF line/paragraph rebuilding, cleanup, sentence splitting, pause planning | MIT |
-| `tts-worker.js` | Runs Kokoro in a Web Worker, trims silence, applies depth, adds pauses, encodes WAV | MIT |
+| `piper-worker.js` | Runs a Piper voice (Ryan) with ONNX Runtime Web; espeak-ng phonemes with punctuation kept for rhythm | MIT |
+| `tts-worker.js` | Runs Kokoro (Michael etc.) in a Web Worker | MIT |
+| `audio-util.js` | Trims silence, applies depth, adds punctuation pauses, encodes WAV | MIT |
 | `sw.js` | Offline cache and cross-origin isolation (enables multi-threaded speech) | MIT |
 | `vendor/kokoro.web.js` | [kokoro-js](https://github.com/hexgrad/kokoro) 1.2.1 (bundles transformers.js) | Apache-2.0 |
 | `vendor/ort/` | ONNX Runtime Web engine | MIT |
 | `ocr.js`, `vendor/tesseract/` | On-device text recognition for image-only PDFs ([Tesseract.js](https://github.com/naptha/tesseract.js) 6) | Apache-2.0 |
 | `vendor/pdfjs/` | [pdf.js](https://mozilla.github.io/pdf.js/) 4.10.38 | Apache-2.0 |
-| Voice model | [Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M), fetched once from Hugging Face | Apache-2.0 |
+| `vendor/ort-piper/` | ONNX Runtime Web 1.31 (for Piper) | MIT |
+| `vendor/phonemizer.js` | [phonemizer](https://github.com/xenova/phonemizer) (espeak-ng compiled to WebAssembly) | Apache-2.0 wrapper; espeak-ng is GPL-3.0 |
+| Voice model (Ryan) | [rhasspy/piper-voices](https://huggingface.co/rhasspy/piper-voices) `en_US-ryan-medium` / `-high`, fetched once | Ryan Speech dataset: CC BY-NC-SA 4.0 (free for non-commercial use) |
+| Voice model (Michael etc.) | [Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M), fetched once from Hugging Face | Apache-2.0 |
 
 Depth works by playing each clip at a slightly lower sample rate, which lowers the pitch. The text is generated
 proportionally faster first, so the reading speed stays the same.

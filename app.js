@@ -12,12 +12,17 @@ const store = {
 };
 
 // ---------- Settings ----------
-const VOICE_NAMES = { am_michael: "Michael", am_fenrir: "Fenrir", am_onyx: "Onyx", am_puck: "Puck", am_eric: "Eric" };
+const VOICE_NAMES = { "piper:en_US-ryan-medium": "Ryan", "piper:en_US-ryan-high": "Ryan HD", am_michael: "Michael", am_fenrir: "Fenrir", am_onyx: "Onyx", am_puck: "Puck", am_eric: "Eric" };
+const DEFAULT_VOICE = "piper:en_US-ryan-medium";
 const S = Object.assign(
-  { voice: "am_michael", depth: 0.95, speed: 1.0, pause: 1, fontSize: 20, skipCite: true, skipUrl: true, skipCaptions: true, wake: true, engine: "wasm", prepMinutes: 20 },
+  { voice: DEFAULT_VOICE, depth: 0.95, speed: 1.0, pause: 1, fontSize: 20, skipCite: true, skipUrl: true, skipCaptions: true, wake: true, engine: "wasm", prepMinutes: 20 },
   store.get("settings", {})
 );
 const saveSettings = () => store.set("settings", S);
+// One-time move to the fast Piper voice: Kokoro proved too slow and heavy on iPhone.
+if (!S.piperMigrated) { if (!S.voice.startsWith("piper:")) S.voice = DEFAULT_VOICE; S.piperMigrated = true; saveSettings(); }
+const isPiper = () => S.voice.startsWith("piper:");
+const usesGpu = () => !isPiper() && S.engine === "webgpu";
 
 // ---------- State ----------
 let doc = null;            // { key, name, pages:[{num, paragraphs}] }
@@ -48,8 +53,11 @@ let jobStartedAt = 0;      // when the engine began the sentence it's working on
 let lastEngineMsg = 0;     // last sign of life while loading
 let gpuWarm = false;       // first GPU sentence is slow (shader setup)
 let strikes = 0;
+let workerVoice = null;    // which model the running engine has loaded
 function startWorker() {
-  worker = new Worker(new URL("./tts-worker.js", import.meta.url), { type: "module" });
+  workerVoice = S.voice;
+  const file = isPiper() ? "./piper-worker.js" : "./tts-worker.js";
+  worker = new Worker(new URL(file, import.meta.url), { type: "module" });
   worker.onmessage = onEngineMessage;
   worker.onerror = (e) => { console.warn("engine crashed", e.message); recover("crashed"); };
 }
@@ -59,14 +67,16 @@ function onEngineMessage(e) {
   const m = e.data;
   lastEngineMsg = Date.now();
   if (m.type === "start") { jobStartedAt = Date.now(); return; }
+  if (m.type === "skipped") { jobStartedAt = 0; return; }
   if (m.type === "audio" || m.type === "genError") { jobStartedAt = 0; if (m.type === "audio") gpuWarm = true; }
   if (m.type === "progress") {
-    const pct = Math.round((m.loaded / m.total) * 100);
-    status(`Downloading voice… ${pct}% (${(m.loaded / 1e6).toFixed(0)} of ${(m.total / 1e6).toFixed(0)} MB)`);
+    const mb = (m.loaded / 1e6).toFixed(0);
+    status(m.total ? `Downloading voice… ${Math.round((m.loaded / m.total) * 100)}% (${mb} of ${(m.total / 1e6).toFixed(0)} MB)` : `Downloading voice… ${mb} MB`);
   } else if (m.type === "ready") {
     ready = true; loading = false; gpuWarm = m.device !== "webgpu";
     store.set("modelSeen", true);
-    $("engineInfo").textContent = `Running on ${m.device === "webgpu" ? "GPU" : "CPU"}${m.isolated ? " (multi-threaded)" : ""}. Changing this reloads the voice.`;
+    if (m.device === "piper") $("voiceInfo").textContent = `${VOICE_NAMES[S.voice]} is ready, running on the CPU${m.threads > 1 ? ` (${m.threads} threads)` : ""}.`;
+    else $("engineInfo").textContent = `Running on ${m.device === "webgpu" ? "GPU" : "CPU"}${m.isolated ? " (multi-threaded)" : ""}. Changing this reloads the voice.`;
     $("firstRun").hidden = true;
     status(prep ? "Preparing screen-off track…" : waiting >= 0 ? "Preparing voice…" : doc ? "Ready" : "Voice ready — open a PDF");
     pump();
@@ -100,7 +110,7 @@ function onEngineMessage(e) {
 const WD = Number(new URLSearchParams(location.search).get("wd")) || 1; // time-limit scale (testing)
 setInterval(() => {
   const now = Date.now();
-  const gpu = S.engine === "webgpu";
+  const gpu = usesGpu();
   if (ready && jobStartedAt) {
     const limit = (gpu ? (gpuWarm ? 40e3 : 90e3) : 240e3) * WD;
     if (now - jobStartedAt > limit) recover("stopped responding");
@@ -114,7 +124,7 @@ function recover(reason) {
   strikes++;
   ready = false; loading = false; jobStartedAt = 0;
   let msg = "Voice engine " + reason + " — restarting it…";
-  if (S.engine === "webgpu" && strikes >= 2) {
+  if (usesGpu() && strikes >= 2) {
     S.engine = "wasm"; saveSettings();
     document.querySelectorAll("#engineSeg button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.v === "wasm")));
     msg = "GPU voice kept freezing — switched to CPU and continuing…";
@@ -135,7 +145,7 @@ function loadVoice() {
   if (ready || loading) return;
   loading = true; lastEngineMsg = Date.now();
   status("Loading voice…");
-  worker.postMessage({ type: "init", device: S.engine });
+  worker.postMessage({ type: "init", device: S.engine, voice: S.voice.replace(/^piper:/, "") });
 }
 
 // ---------- Generation pipeline ----------
@@ -263,7 +273,7 @@ function startPrep(minutes) {
   audio.pause(); setPlaying(false); waiting = -1;
   resetPipeline({ keepCache: true });
   prep = { serial: ++prepSerial, target: minutes * 60, parts: [], ids: [], starts: [], samples: 0,
-    rate: Math.round(24000 * S.depth), next: cur, inflight: 0, t0: performance.now(), first: cur };
+    rate: Math.round((isPiper() ? 22050 : 24000) * S.depth), next: cur, inflight: 0, t0: performance.now(), first: cur };
   requestWake();
   showPrepUI();
   if (!ready) { loadVoice(); $("prepText").textContent = "Loading voice…"; }
@@ -288,6 +298,7 @@ function onPrepAudio(m, err) {
   if (!prep || +serial !== prep.serial) return;
   prep.inflight--;
   if (m) {
+    if (m.rate) prep.rate = m.rate;
     prep.starts.push(prep.samples / prep.rate);
     prep.ids.push(+idx);
     prep.parts.push(m.buf);
@@ -622,6 +633,7 @@ function setSetting(k, v) {
   if (S[k] === v) return;
   if (prep && ["voice", "depth", "speed", "pause", "skipCite", "skipUrl", "skipCaptions"].includes(k)) { cancelPrep(); status("Settings changed — tap Prepare again"); }
   S[k] = v; saveSettings(); applyUI();
+  if (k === "voice" && S.voice !== workerVoice) switchEngine();
   if (["voice", "depth", "speed", "pause"].includes(k)) {
     // keep the sentence that's playing; regenerate from the next one
     resetPipeline({ except: playing ? cur : -1 });
@@ -630,11 +642,22 @@ function setSetting(k, v) {
   else if (k === "engine") { store.set("settings", S); location.reload(); }
   else if (k === "wake") { if (v && playing) requestWake(); else releaseWake(); }
 }
+// A different voice model needs a fresh engine (Ryan and Michael run in different engines).
+function switchEngine() {
+  try { worker.terminate(); } catch {}
+  ready = false; loading = false; jobStartedAt = 0; strikes = 0;
+  epoch++; requested.clear();
+  startWorker();
+  loadVoice();
+}
+
 function applyUI() {
   $("speedChip").textContent = S.speed.toFixed(S.speed * 10 % 1 ? 2 : 1) + "×";
   $("speedVal").textContent = S.speed.toFixed(2) + "×";
   $("speed").value = S.speed;
   $("voiceChip").textContent = VOICE_NAMES[S.voice] || "Voice";
+  $("voiceSel").value = S.voice;
+  $("engineField").hidden = isPiper();
   document.documentElement.style.setProperty("--fs", S.fontSize + "px");
   updateMediaSession();
 }
@@ -643,7 +666,8 @@ applyUI();
 // ---------- Startup ----------
 const last = store.get("lastDoc");
 if (last?.pages) loadDoc(last, true);
-if (store.get("modelSeen", false)) loadVoice(); // already downloaded before → warm up silently
+// Warm up a light voice that was downloaded before. (Michael is heavy, so it loads on demand.)
+if (store.get("modelSeen", false) && isPiper()) loadVoice();
 
 // Offline support + cross-origin isolation (enables multi-threaded speech engine).
 if ("serviceWorker" in navigator && location.protocol !== "file:") {

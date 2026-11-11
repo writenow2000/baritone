@@ -1,12 +1,13 @@
 // Baritone service worker: offline app shell + cross-origin isolation headers
 // (lets the speech engine use multiple CPU threads). MIT License.
-const VERSION = "baritone-v4";
+const VERSION = "baritone-v5";
 const SHELL = [
-  "./", "index.html", "app.js", "textproc.js", "ocr.js", "tts-worker.js", "manifest.webmanifest",
-  "vendor/kokoro.web.js", "vendor/pdfjs/pdf.min.mjs", "vendor/pdfjs/pdf.worker.min.mjs",
-  "vendor/ort/ort-wasm-simd-threaded.jsep.mjs", "vendor/ort/ort-wasm-simd-threaded.jsep.wasm",
+  "./", "index.html", "app.js", "textproc.js", "ocr.js", "audio-util.js", "piper-worker.js", "tts-worker.js", "manifest.webmanifest",
+  "vendor/pdfjs/pdf.min.mjs", "vendor/pdfjs/pdf.worker.min.mjs",
+  "vendor/phonemizer.js", "vendor/ort-piper/ort.wasm.bundle.min.mjs", "vendor/ort-piper/ort-wasm-simd-threaded.mjs", "vendor/ort-piper/ort-wasm-simd-threaded.wasm",
   "icons/icon-180.png", "icons/icon-192.png", "icons/icon-512.png",
 ];
+// Michael (Kokoro) and text-recognition files are cached the first time they're used.
 
 self.addEventListener("install", (e) => {
   e.waitUntil(caches.open(VERSION).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));

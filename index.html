@@ -114,7 +114,7 @@
     <p>A deep, clear American voice reads your documents aloud. The neural voice runs entirely on this phone — nothing is uploaded.</p>
     <button class="big-btn" id="openBig">Open a PDF</button>
     <button class="link-btn" id="pasteBtn">or paste text</button>
-    <p class="note" id="firstRun">The first time, the voice model (about 90&nbsp;MB) downloads once and is then stored for offline use.</p>
+    <p class="note" id="firstRun">The first time, the voice (about 60&nbsp;MB) downloads once and is then stored for offline use.</p>
   </section>
   <article id="reader" hidden aria-live="off"></article>
 </main>
@@ -127,7 +127,7 @@
     <button class="ctl" id="prevBtn" aria-label="Previous sentence"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 5h2v14H6zM20 5v14L9.5 12z"/></svg></button>
     <button class="ctl play" id="playBtn" aria-label="Play"><svg id="playIcon" viewBox="0 0 24 24" fill="currentColor"><path d="M7 4.5v15l13-7.5z"/></svg></button>
     <button class="ctl" id="nextBtn" aria-label="Next sentence"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M16 5h2v14h-2zM4 5v14l10.5-7z"/></svg></button>
-    <button class="chip" id="voiceChip" aria-label="Voice">Michael</button>
+    <button class="chip" id="voiceChip" aria-label="Voice">Ryan</button>
   </div>
 </div>
 
@@ -137,12 +137,19 @@
     <div class="field">
       <label for="voiceSel">Narrator</label>
       <select id="voiceSel">
-        <option value="am_michael">Michael — clear baritone (best)</option>
-        <option value="am_fenrir">Fenrir — rich, resonant</option>
-        <option value="am_onyx">Onyx — deepest, darker tone</option>
-        <option value="am_puck">Puck — brighter, lively</option>
-        <option value="am_eric">Eric — calm, even</option>
+        <optgroup label="Fast — recommended on iPhone">
+          <option value="piper:en_US-ryan-medium">Ryan — deep, clear (60 MB)</option>
+          <option value="piper:en_US-ryan-high">Ryan HD — richer, slower (115 MB)</option>
+        </optgroup>
+        <optgroup label="Natural — slow on iPhone">
+          <option value="am_michael">Michael — warm baritone</option>
+          <option value="am_fenrir">Fenrir — rich, resonant</option>
+          <option value="am_onyx">Onyx — deepest, darker tone</option>
+          <option value="am_puck">Puck — brighter, lively</option>
+          <option value="am_eric">Eric — calm, even</option>
+        </optgroup>
       </select>
+      <small id="voiceInfo">Ryan is built for phones and makes speech several times faster. Michael sounds more natural but is slow and memory-hungry on iPhone.</small>
     </div>
     <div class="field">
       <span class="lbl" id="depthLbl">Depth</span>
@@ -173,8 +180,8 @@
       <label class="check"><input type="checkbox" id="skipUrl"> Say "link" instead of reading web addresses</label>
       <label class="check"><input type="checkbox" id="wake"> Keep screen on while reading</label>
     </div>
-    <div class="field">
-      <span class="lbl" id="engLbl">Voice engine</span>
+    <div class="field" id="engineField">
+      <span class="lbl" id="engLbl">Voice engine (Michael voices)</span>
       <div class="seg" role="group" aria-labelledby="engLbl" id="engineSeg">
         <button data-v="wasm">CPU (90 MB)</button><button data-v="webgpu">GPU (330 MB)</button>
       </div>
